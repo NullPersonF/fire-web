@@ -9,7 +9,8 @@ export function monthKey(date = new Date()) {
 export function fiscalStart(startMonth, date = new Date()) {
   const current = new Date(date);
   const year = current.getMonth() + 1 >= startMonth ? current.getFullYear() : current.getFullYear() - 1;
-  return new Date(year, startMonth - 1, 1);
+  // Use the middle of the month so converting to ISO does not cross a timezone boundary.
+  return new Date(year, startMonth - 1, 15);
 }
 
 export function monthsForFiscalYear(start) {

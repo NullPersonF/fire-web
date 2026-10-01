@@ -78,10 +78,18 @@ function transactionsView() {
 
 function budgetView() {
   const year = activeYear(state), projects = yearProjects(year), month = currentBudgetMonth(state, year), base = baseFlexible(state, year);
-  return `${sectionTitle("当前财年", `<button class="text-button" data-nav="settings">财年设置</button>`)}<div class="panel"><div class="panel-row"><span>周期</span><strong>${year.startDate.slice(0, 7)} 至 ${new Date(new Date(year.startDate).setMonth(new Date(year.startDate).getMonth() + 11)).toISOString().slice(0, 7)}</strong></div><label>年度总预算<input id="annualBudget" type="number" step="0.01" placeholder="未填写" value="${year.annualBudget ?? ""}"></label><button class="button secondary" id="saveAnnual">保存年度预算</button></div>
+  return `${sectionTitle("当前财年", `<button class="text-button" data-nav="settings">财年设置</button>`)}<div class="panel"><div class="panel-row"><span>周期</span><strong>${fiscalPeriodLabel(year)}</strong></div><label>年度总预算<input id="annualBudget" type="number" step="0.01" placeholder="未填写" value="${year.annualBudget ?? ""}"></label><button class="button secondary" id="saveAnnual">保存年度预算</button></div>
     ${sectionTitle("预算项目", `<button class="text-button" id="addProject">新增</button>`)}<div class="list">${projects.length ? projects.map(p => `<div class="list-row"><div><strong>${esc(p.name)}</strong><small>${p.type === "interMonth" ? "跨月预算" : p.type === "utilities" ? "水电费" : "月度固定支出"}</small></div><div class="row-end"><input class="inline-input" data-project-amount="${p.id}" type="number" step="0.01" value="${p.amount ?? ""}" placeholder="未填写"><button class="icon-button" data-delete-project="${p.id}">×</button></div></div>`).join("") : `<div class="empty">还没有预算项目</div>`}</div>
     <div class="panel"><div class="panel-row"><span>基础月度灵活支出</span><strong>${base === null ? "待填写预算" : formatMoney(base)}</strong></div>${month?.flexible ? `<div class="panel-row"><span>本月剩余</span><strong class="${month.flexible.closing < 0 ? "negative" : ""}">${signedMoney(month.flexible.closing)}</strong></div>` : ""}<p class="muted">固定项目和灵活支出的正负结余会在统一结算时结转到下月。</p><button class="button primary-button" id="settle">统一结算至当前月</button></div>
     ${sectionTitle("跨年预算", `<button class="text-button" id="addMulti">新增</button>`)}<div class="list">${state.multiYear.filter(p => p.active !== false).map(p => `<div class="list-row"><div><strong>${esc(p.name)}</strong><small>跨年资金池</small></div><div class="row-end"><strong>${formatMoney(p.amount)}</strong><button class="icon-button" data-delete-multi="${p.id}">×</button></div></div>`).join("") || `<div class="empty">还没有跨年预算</div>`}</div>`;
+}
+
+function fiscalPeriodLabel(year) {
+  const storedYear = Number(String(year.startDate || "").slice(0, 4)) || new Date().getFullYear();
+  const start = new Date(Date.UTC(storedYear, year.startMonth - 1, 1));
+  const end = new Date(Date.UTC(storedYear, year.startMonth - 1 + 11, 1));
+  const key = date => `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  return `${key(start)} 至 ${key(end)}`;
 }
 
 function settingsView() {
