@@ -1,0 +1,10 @@
+{
+  "name": "FIRE 账本",
+  "short_name": "FIRE 账本",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f7f3ef",
+  "theme_color": "#8a6a58",
+  "lang": "zh-CN",
+  "icons": []
+}
