@@ -205,7 +205,7 @@ async function importJSON(event) {
 async function boot() {
   state = await loadState(createInitialState());
   storagePersistent = await requestPersistentStorage();
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").then(registration => registration.update()).catch(() => {});
   render();
 }
 
