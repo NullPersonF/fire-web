@@ -45,13 +45,57 @@ export function savingsTotal(state) {
 }
 
 export function fireTarget(state) { return state.fireTargets.reduce((sum, row) => sum + money(row.amount), 0); }
-export function totalAssets(state) { return savingsTotal(state) + money(state.expenseBalance); }
+export function expenseTransactions(state) {
+  return state.transactions.filter(t => t.active !== false && t.account === "expense");
+}
+
+export function budgetSpent(state, target) {
+  return expenseTransactions(state).filter(t => t.target === target).reduce((sum, t) => sum + money(t.amount), 0);
+}
+
 export function baseFlexible(state, year = activeYear(state)) {
   if (!year || year.annualBudget === null || year.projects.some(p => p.active !== false && p.amount === null)) return null;
   const interMonth = year.projects.filter(p => p.active !== false && p.type === "interMonth").reduce((sum, p) => sum + money(p.amount), 0);
   const fixed = year.projects.filter(p => p.active !== false && ["monthlyFixed", "utilities"].includes(p.type)).reduce((sum, p) => sum + money(p.amount), 0);
   return (money(year.annualBudget) - interMonth - fixed * 12) / 12;
 }
+
+export function expenseBudgetRows(state, year = activeYear(state)) {
+  if (!year) return [];
+  const rows = year.projects.filter(p => p.active !== false).map(project => {
+    const monthly = ["monthlyFixed", "utilities"].includes(project.type);
+    const budget = project.amount === null ? null : money(project.amount) * (monthly ? 12 : 1);
+    const target = `project:${project.id}`;
+    return { id: target, name: project.name, type: project.type, budget, spent: budgetSpent(state, target), target };
+  });
+  const flexible = baseFlexible(state, year);
+  rows.push({
+    id: "flexible",
+    name: "月度灵活支出",
+    type: "flexible",
+    budget: flexible === null ? null : flexible * 12,
+    spent: budgetSpent(state, "flexible"),
+    target: "flexible"
+  });
+  state.multiYear.filter(project => project.active !== false).forEach(project => {
+    const target = `multi:${project.id}`;
+    rows.push({ id: target, name: project.name, type: "multiYear", budget: money(project.amount), spent: budgetSpent(state, target), target });
+  });
+  return rows.map(row => ({ ...row, remaining: row.budget === null ? null : row.budget - row.spent }));
+}
+
+export function expenseBudgetBalance(state, year = activeYear(state)) {
+  const annual = year?.annualBudget;
+  const multiYear = state.multiYear.filter(project => project.active !== false).reduce((sum, project) => sum + money(project.amount), 0);
+  const rows = expenseBudgetRows(state, year);
+  const configuredRows = rows.filter(row => row.budget !== null);
+  if (annual === null && !configuredRows.length) return null;
+  const budget = (annual === null ? configuredRows.reduce((sum, row) => sum + row.budget, 0) : money(annual) + multiYear);
+  const spent = rows.reduce((sum, row) => sum + row.spent, 0);
+  return budget - spent;
+}
+
+export function totalAssets(state) { return savingsTotal(state) + money(expenseBudgetBalance(state)); }
 
 export function currentBudgetMonth(state, year = activeYear(state)) {
   return year?.months.find(m => m.key === monthKey()) || year?.months[0];

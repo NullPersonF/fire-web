@@ -1,5 +1,5 @@
 import { loadState, saveState, requestPersistentStorage } from "./storage.js";
-import { activeYear, baseFlexible, currentBudgetMonth, createInitialState, fireTarget, formatMoney, id, latestIncome, money, monthKey, monthsForFiscalYear, savingsTotal, signedMoney, totalAssets, fiscalStart } from "./domain.js";
+import { activeYear, baseFlexible, budgetSpent, currentBudgetMonth, createInitialState, expenseBudgetBalance, expenseBudgetRows, fireTarget, formatMoney, id, latestIncome, money, monthKey, monthsForFiscalYear, savingsTotal, signedMoney, totalAssets, fiscalStart } from "./domain.js";
 
 const app = document.querySelector("#app");
 let state;
@@ -18,6 +18,7 @@ const esc = value => String(value ?? "").replace(/[&<>\"']/g, char => ({ "&": "&
 const inputMoney = value => value === "" ? null : money(value);
 const activeTransactions = () => state.transactions.filter(t => t.active !== false);
 const yearProjects = year => (year?.projects || []).filter(project => project.active !== false);
+const projectTypeLabel = type => ({ interMonth: "跨月预算", monthlyFixed: "月度固定支出", utilities: "水电费", flexible: "月度灵活支出", multiYear: "跨年预算" }[type] || type);
 
 function icon(name) {
   const paths = { chart: "M4 19V5m0 14h16M7 15l3-4 3 2 5-7", assets: "M3 21h18M5 21V5h14v16M8 9h2m-2 4h2m4-4h2m-2 4h2", plus: "M12 5v14M5 12h14", calendar: "M5 4h14v16H5zM8 2v4m8-4v4M5 9h14", gear: "M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM4 12h2m12 0h2M12 4v2m0 12v2" };
@@ -44,22 +45,28 @@ function sectionTitle(title, action = "") { return `<div class="section-title"><
 function amount(value, className = "") { return `<strong class="amount ${className}">${formatMoney(value)}</strong>`; }
 
 function dashboardView() {
-  const target = fireTarget(state), assets = totalAssets(state), gap = target - assets, income = latestIncome(state), monthly = income ? money(income.salary) + money(income.fund) : 0;
+  const target = fireTarget(state), assets = totalAssets(state), expenseBalance = expenseBudgetBalance(state), gap = target - assets, income = latestIncome(state), monthly = income ? money(income.salary) + money(income.fund) : 0;
   const months = gap > 0 && monthly > 0 ? Math.ceil(gap / monthly) : null;
   const retirement = months ? new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long" }).format(new Date(new Date().getFullYear(), new Date().getMonth() + months, 1)) : "";
   return `<div class="hero"><p class="eyebrow">${activeYear(state)?.startMonth || 1} 月起 · 当前财年</p><h2>财务自由看板</h2><p class="muted">所有数据只保存在这台设备上。</p></div>
-    <div class="metric primary"><span>当前总资产</span>${amount(assets)}<small>储蓄 ${formatMoney(savingsTotal(state))} · 支出账户 ${formatMoney(state.expenseBalance)}</small></div>
+    <div class="metric primary"><span>当前总资产</span>${amount(assets)}<small>储蓄 ${formatMoney(savingsTotal(state))} · 支出账户 ${expenseBalance === null ? "待填写预算" : formatMoney(expenseBalance)}</small></div>
     <div class="grid-two"><div class="metric"><span>FIRE 总目标</span>${amount(target)}</div><div class="metric"><span>资金缺口</span>${gap <= 0 ? "<strong class=\"status-good\">FIRE 已达成</strong>" : amount(gap)} </div></div>
     <div class="panel"><div class="panel-row"><span>还需要工作</span><strong>${gap <= 0 ? "已达成" : months ? `${months} 个月` : "待填写收入"}</strong></div>${retirement ? `<p class="muted">预计将在 ${retirement} 实现财务自由并退休</p>` : ""}<button class="button secondary" data-nav="assets">填写收入与资产</button></div>
     ${sectionTitle("FIRE 目标", `<button class="text-button" data-nav="settings">管理</button>`)}
     <div class="target-summary">${["largeOrPeriodic", "dailyFixed", "dailyFlexible"].map(type => { const rows = state.fireTargets.filter(t => t.type === type); const labels = { largeOrPeriodic: "大额/周期性", dailyFixed: "日常固定", dailyFlexible: "日常弹性" }; return `<div><span>${labels[type]}</span><strong>${formatMoney(rows.reduce((s, t) => s + money(t.amount), 0))}</strong></div>`; }).join("")}</div>`;
 }
 
+function expenseBalanceRows() {
+  return expenseBudgetRows(state);
+}
+
 function assetsView() {
   const incomes = [...state.incomes].sort((a, b) => b.month.localeCompare(a.month));
+  const expenseBalance = expenseBudgetBalance(state);
+  const rows = expenseBalanceRows();
   return `${sectionTitle("资产", `<button class="text-button" data-nav="settings">数据设置</button>`)}
     <div class="panel"><div class="panel-row"><span>储蓄账户当前总额</span>${amount(savingsTotal(state), "brown")}</div><div class="form-grid"><label>初始现金<input id="initialCash" type="number" step="0.01" value="${esc(state.savings.initialCash)}"></label><label>股票账户市值<input id="stockValue" type="number" step="0.01" value="${esc(state.savings.stockValue)}"></label></div><button class="button primary-button" id="saveAssets">保存资产</button></div>
-    <div class="panel"><div class="panel-row"><span>支出账户当前余额</span>${amount(state.expenseBalance)}</div><label>直接覆盖余额<input id="expenseBalance" type="number" step="0.01" value="${esc(state.expenseBalance)}"></label><button class="button secondary" id="saveExpenseBalance">保存支出账户余额</button></div>
+    <div class="panel"><div class="panel-row"><span>支出账户当前余额</span>${expenseBalance === null ? "<strong>待填写预算</strong>" : amount(expenseBalance)}</div><p class="muted">按年度预算和跨年预算合计，扣除支出账户流水后计算，并按预算项目展示结余。</p><div class="budget-balance-list">${rows.length ? rows.map(row => `<div class="budget-balance-row"><div><strong>${esc(row.name)}</strong><small>${projectTypeLabel(row.type)} · 已支出 ${formatMoney(row.spent)}</small></div><strong class="${row.remaining < 0 ? "negative" : ""}">${row.remaining === null ? "待填写" : formatMoney(row.remaining)}</strong></div>`).join("") : `<div class="empty">请先填写预算项目</div>`}</div></div>
     ${sectionTitle("月度工资与公积金")}
     <form class="panel" id="incomeForm"><div class="form-grid"><label>月份<input name="month" type="month" value="${monthKey()}"></label><label>净工资<input name="salary" type="number" step="0.01" min="0" placeholder="0"></label><label>公积金<input name="fund" type="number" step="0.01" min="0" placeholder="0"></label></div><button class="button primary-button">保存本月收入</button></form>
     <div class="list">${incomes.length ? incomes.map(row => `<div class="list-row"><div><strong>${esc(row.month)}</strong><small>工资 ${formatMoney(row.salary)} · 公积金 ${formatMoney(row.fund)}</small></div><strong>${formatMoney(money(row.salary) + money(row.fund))}</strong></div>`).join("") : `<div class="empty">尚未填写月度收入</div>`}</div>`;
@@ -78,10 +85,26 @@ function transactionsView() {
 
 function budgetView() {
   const year = activeYear(state), projects = yearProjects(year), month = currentBudgetMonth(state, year), base = baseFlexible(state, year);
+  const projectGroups = [
+    ["跨月预算", "interMonth", "按完整财年维护总额"],
+    ["月度固定支出", "monthlyFixed", "按单月额度维护，全年按 12 个月计入预算"],
+    ["水电费", "utilities", "结余按水电费规则结转到下月"]
+  ];
+  const projectSections = projectGroups.map(([title, type, hint]) => budgetProjectSection(title, type, hint, projects.filter(project => project.type === type))).join("");
   return `${sectionTitle("当前财年", `<button class="text-button" data-nav="settings">财年设置</button>`)}<div class="panel"><div class="panel-row"><span>周期</span><strong>${fiscalPeriodLabel(year)}</strong></div><label>年度总预算<input id="annualBudget" type="number" step="0.01" placeholder="未填写" value="${year.annualBudget ?? ""}"></label><button class="button secondary" id="saveAnnual">保存年度预算</button></div>
-    ${sectionTitle("预算项目", `<button class="text-button" id="addProject">新增</button>`)}<div class="list">${projects.length ? projects.map(p => `<div class="list-row"><div><strong>${esc(p.name)}</strong><small>${p.type === "interMonth" ? "跨月预算" : p.type === "utilities" ? "水电费" : "月度固定支出"}</small></div><div class="row-end"><input class="inline-input" data-project-amount="${p.id}" type="number" step="0.01" value="${p.amount ?? ""}" placeholder="未填写"><button class="icon-button" data-delete-project="${p.id}">×</button></div></div>`).join("") : `<div class="empty">还没有预算项目</div>`}</div>
+    ${projectSections}
     <div class="panel"><div class="panel-row"><span>基础月度灵活支出</span><strong>${base === null ? "待填写预算" : formatMoney(base)}</strong></div>${month?.flexible ? `<div class="panel-row"><span>本月剩余</span><strong class="${month.flexible.closing < 0 ? "negative" : ""}">${signedMoney(month.flexible.closing)}</strong></div>` : ""}<p class="muted">固定项目和灵活支出的正负结余会在统一结算时结转到下月。</p><button class="button primary-button" id="settle">统一结算至当前月</button></div>
     ${sectionTitle("跨年预算", `<button class="text-button" id="addMulti">新增</button>`)}<div class="list">${state.multiYear.filter(p => p.active !== false).map(p => `<div class="list-row"><div><strong>${esc(p.name)}</strong><small>跨年资金池</small></div><div class="row-end"><strong>${formatMoney(p.amount)}</strong><button class="icon-button" data-delete-multi="${p.id}">×</button></div></div>`).join("") || `<div class="empty">还没有跨年预算</div>`}</div>`;
+}
+
+function budgetProjectSection(title, type, hint, projects) {
+  const rows = projects.map(project => {
+    const annualBudget = project.amount === null ? null : money(project.amount) * (["monthlyFixed", "utilities"].includes(project.type) ? 12 : 1);
+    const spent = budgetSpent(state, `project:${project.id}`);
+    const remaining = annualBudget === null ? null : annualBudget - spent;
+    return `<div class="list-row"><div><strong>${esc(project.name)}</strong><small>${projectTypeLabel(project.type)} · 已用 ${formatMoney(spent)} · 剩余 ${remaining === null ? "待填写" : formatMoney(remaining)}</small></div><div class="row-end"><input class="inline-input" data-project-amount="${project.id}" type="number" step="0.01" value="${project.amount ?? ""}" placeholder="未填写"><button class="icon-button" data-delete-project="${project.id}" aria-label="删除">×</button></div></div>`;
+  }).join("");
+  return `${sectionTitle(title, `<button class="text-button" data-add-project-type="${type}">新增</button>`)}<p class="muted budget-hint">${hint}</p><div class="list">${rows || `<div class="empty">还没有${title}项目</div>`}</div>`;
 }
 
 function fiscalPeriodLabel(year) {
@@ -92,22 +115,26 @@ function fiscalPeriodLabel(year) {
   return `${key(start)} 至 ${key(end)}`;
 }
 
+function fireTypeOptions(selected) {
+  const types = [["largeOrPeriodic", "大额/周期性支出"], ["dailyFixed", "日常固定支出"], ["dailyFlexible", "日常弹性消费"]];
+  return types.map(([value, label]) => `<option value="${value}" ${selected === value ? "selected" : ""}>${label}</option>`).join("");
+}
+
 function settingsView() {
   return `${sectionTitle("设置")}<div class="panel"><h3>财年</h3><label>起始月份<select id="fiscalStart">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${state.settings.fiscalStartMonth === i + 1 ? "selected" : ""}>${i + 1} 月</option>`).join("")}</select></label><button class="button secondary" id="resetFiscal">确认并进入新财年</button><p class="muted">旧财年会封存，新财年保留项目名称但清空金额和流水。</p></div>
     <div class="panel"><h3>数据备份</h3><p class="muted">JSON 备份包含全部资产、预算、流水、结算和 FIRE 目标，可在本机恢复。</p><div class="button-row"><button class="button primary-button" id="exportJSON">导出 JSON</button><button class="button secondary" id="importJSON">恢复 JSON</button><input id="jsonFile" type="file" accept="application/json" hidden></div><p class="muted">${storagePersistent ? "浏览器已申请持久化存储。" : "当前使用浏览器本地存储，请定期导出备份。"}</p></div>
-    <div class="panel"><h3>FIRE 目标</h3><form id="fireForm" class="form-grid"><label>类型<select name="type"><option value="largeOrPeriodic">大额/周期性支出</option><option value="dailyFixed">日常固定支出</option><option value="dailyFlexible">日常弹性消费</option></select></label><label>名称<input name="name" required></label><label>总金额<input name="amount" type="number" min="0" step="0.01" required></label><button class="button secondary">新增目标</button></form><div class="compact-list">${state.fireTargets.map(t => `<div><span>${esc(t.name)}</span><strong>${formatMoney(t.amount)}</strong></div>`).join("") || "暂无目标"}</div></div>`;
+    <div class="panel"><h3>FIRE 目标</h3><form id="fireForm" class="form-grid"><label>类型<select name="type">${fireTypeOptions()}</select></label><label>名称<input name="name" required></label><label>总金额<input name="amount" type="number" min="0" step="0.01" required></label><button class="button secondary">新增目标</button></form><div class="compact-list target-list">${state.fireTargets.map(t => `<div class="target-row" data-fire-row="${t.id}"><label>类型<select data-fire-type>${fireTypeOptions(t.type)}</select></label><label>名称<input data-fire-name value="${esc(t.name)}"></label><label>金额<input data-fire-amount type="number" min="0" step="0.01" value="${esc(t.amount)}"></label><div class="row-end"><button class="button secondary small-button" data-save-fire="${t.id}">保存</button><button class="icon-button" data-delete-fire="${t.id}" aria-label="删除">×</button></div></div>`).join("") || "暂无目标"}</div></div>`;
 }
 
 function bindEvents() {
   document.querySelectorAll("[data-nav]").forEach(node => node.addEventListener("click", () => { page = node.dataset.nav; render(); }));
   document.querySelector("#saveAssets")?.addEventListener("click", async () => { state.savings.initialCash = inputMoney(document.querySelector("#initialCash").value) || 0; state.savings.stockValue = inputMoney(document.querySelector("#stockValue").value) || 0; await persist(); render(); });
-  document.querySelector("#saveExpenseBalance")?.addEventListener("click", async () => { state.expenseBalance = inputMoney(document.querySelector("#expenseBalance").value) || 0; await persist(); render(); });
   document.querySelector("#incomeForm")?.addEventListener("submit", async event => { event.preventDefault(); const data = new FormData(event.currentTarget); const row = { month: data.get("month"), salary: inputMoney(data.get("salary")) || 0, fund: inputMoney(data.get("fund")) || 0 }; const old = state.incomes.find(item => item.month === row.month); if (old) Object.assign(old, row); else state.incomes.push(row); await persist(); render(); });
-  document.querySelector("#transactionForm")?.addEventListener("submit", async event => { event.preventDefault(); const data = new FormData(event.currentTarget); const amountValue = inputMoney(data.get("amount")); if (!amountValue || amountValue <= 0) return toast("金额必须大于 0"); const target = data.get("target"); if (data.get("account") === "expense" && !target) return toast("请选择预算目标"); const category = target === "flexible" ? data.get("flexibleName") || "灵活支出" : target?.startsWith("project:") ? yearProjects(activeYear(state)).find(p => p.id === target.slice(8))?.name : target?.startsWith("multi:") ? state.multiYear.find(p => p.id === target.slice(6))?.name : "储蓄账户支出"; const tx = { id: id(), amount: amountValue, category, memo: data.get("memo") || "", occurredAt: data.get("date") || monthKey(), account: data.get("account"), active: true, target, month: currentBudgetMonth(state)?.key || monthKey() }; state.transactions.push(tx); if (tx.account === "expense") state.expenseBalance -= amountValue; await persist(); render(); });
-  document.querySelectorAll("[data-delete-transaction]").forEach(node => node.addEventListener("click", async () => { const tx = state.transactions.find(item => item.id === node.dataset.deleteTransaction); if (!tx || !confirm("删除这笔流水？预算会生成返还影响。")) return; tx.active = false; if (tx.account === "expense") state.expenseBalance += money(tx.amount); await persist(); render(); }));
+  document.querySelector("#transactionForm")?.addEventListener("submit", async event => { event.preventDefault(); const data = new FormData(event.currentTarget); const amountValue = inputMoney(data.get("amount")); if (!amountValue || amountValue <= 0) return toast("金额必须大于 0"); const target = data.get("target"); if (data.get("account") === "expense" && !target) return toast("请选择预算目标"); const category = target === "flexible" ? data.get("flexibleName") || "灵活支出" : target?.startsWith("project:") ? yearProjects(activeYear(state)).find(p => p.id === target.slice(8))?.name : target?.startsWith("multi:") ? state.multiYear.find(p => p.id === target.slice(6))?.name : "储蓄账户支出"; const tx = { id: id(), amount: amountValue, category, memo: data.get("memo") || "", occurredAt: data.get("date") || monthKey(), account: data.get("account"), active: true, target, month: currentBudgetMonth(state)?.key || monthKey() }; state.transactions.push(tx); await persist(); render(); });
+  document.querySelectorAll("[data-delete-transaction]").forEach(node => node.addEventListener("click", async () => { const tx = state.transactions.find(item => item.id === node.dataset.deleteTransaction); if (!tx || !confirm("删除这笔流水？预算会生成返还影响。")) return; tx.active = false; await persist(); render(); }));
   document.querySelector("#saveAnnual")?.addEventListener("click", async () => { activeYear(state).annualBudget = inputMoney(document.querySelector("#annualBudget").value); await persist(); render(); });
   document.querySelectorAll("[data-project-amount]").forEach(node => node.addEventListener("change", async () => { const p = activeYear(state).projects.find(item => item.id === node.dataset.projectAmount); p.amount = inputMoney(node.value); await persist(); render(); }));
-  document.querySelector("#addProject")?.addEventListener("click", async () => { const name = prompt("项目名称"); if (!name?.trim()) return; const type = prompt("类型：interMonth / monthlyFixed / utilities", "monthlyFixed"); if (!["interMonth", "monthlyFixed", "utilities"].includes(type)) return toast("类型不正确"); activeYear(state).projects.push({ id: id(), name: name.trim(), type, amount: null, active: true }); await persist(); render(); });
+  document.querySelectorAll("[data-add-project-type]").forEach(node => node.addEventListener("click", async () => { const type = node.dataset.addProjectType; const name = prompt(`${projectTypeLabel(type)}项目名称`); if (!name?.trim()) return; if (yearProjects(activeYear(state)).some(project => project.name === name.trim())) return toast("预算项目名称不能重复"); activeYear(state).projects.push({ id: id(), name: name.trim(), type, amount: null, active: true }); await persist(); render(); }));
   document.querySelectorAll("[data-delete-project]").forEach(node => node.addEventListener("click", async () => { const p = activeYear(state).projects.find(item => item.id === node.dataset.deleteProject); if (!p || !confirm("删除预算项目？有关联流水时不能删除。")) return; if (activeTransactions().some(t => t.target === `project:${p.id}`)) return toast("该项目仍有关联流水，请先删除流水"); p.active = false; await persist(); render(); }));
   document.querySelector("#settle")?.addEventListener("click", async () => { try { settle(); await persist(); render(); toast("已结算到当前月"); } catch (error) { toast(error.message); } });
   document.querySelector("#addMulti")?.addEventListener("click", async () => { const name = prompt("跨年项目名称"); if (!name?.trim()) return; const value = inputMoney(prompt("预算总额", "0")); state.multiYear.push({ id: id(), name: name.trim(), amount: value || 0, active: true }); await persist(); render(); });
@@ -117,6 +144,27 @@ function bindEvents() {
   document.querySelector("#importJSON")?.addEventListener("click", () => document.querySelector("#jsonFile").click());
   document.querySelector("#jsonFile")?.addEventListener("change", importJSON);
   document.querySelector("#fireForm")?.addEventListener("submit", async event => { event.preventDefault(); const data = new FormData(event.currentTarget); state.fireTargets.push({ id: id(), type: data.get("type"), name: data.get("name"), amount: inputMoney(data.get("amount")) || 0 }); await persist(); render(); });
+  document.querySelectorAll("[data-save-fire]").forEach(node => node.addEventListener("click", async () => {
+    const target = state.fireTargets.find(item => item.id === node.dataset.saveFire);
+    const row = node.closest("[data-fire-row]");
+    if (!target || !row) return;
+    const name = row.querySelector("[data-fire-name]").value.trim();
+    const amountValue = inputMoney(row.querySelector("[data-fire-amount]").value);
+    if (!name) return toast("目标名称不能为空");
+    if (amountValue === null || amountValue < 0) return toast("目标金额不能小于 0");
+    target.type = row.querySelector("[data-fire-type]").value;
+    target.name = name;
+    target.amount = amountValue;
+    await persist();
+    render();
+  }));
+  document.querySelectorAll("[data-delete-fire]").forEach(node => node.addEventListener("click", async () => {
+    const target = state.fireTargets.find(item => item.id === node.dataset.deleteFire);
+    if (!target || !confirm(`删除 FIRE 目标“${target.name}”？`)) return;
+    state.fireTargets = state.fireTargets.filter(item => item.id !== target.id);
+    await persist();
+    render();
+  }));
 }
 
 function settle() {
