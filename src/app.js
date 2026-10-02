@@ -5,6 +5,8 @@ const app = document.querySelector("#app");
 let state;
 let page = "dashboard";
 let storagePersistent = false;
+let showMultiYearForm = false;
+let projectFormType = null;
 
 const nav = [
   ["dashboard", "看板", "chart"],
@@ -94,7 +96,9 @@ function budgetView() {
   return `${sectionTitle("当前财年", `<button class="text-button" data-nav="settings">财年设置</button>`)}<div class="panel"><div class="panel-row"><span>周期</span><strong>${fiscalPeriodLabel(year)}</strong></div><label>年度总预算<input id="annualBudget" type="number" step="0.01" placeholder="未填写" value="${year.annualBudget ?? ""}"></label><button class="button secondary" id="saveAnnual">保存年度预算</button></div>
     ${projectSections}
     <div class="panel"><div class="panel-row"><span>基础月度灵活支出</span><strong>${base === null ? "待填写预算" : formatMoney(base)}</strong></div>${month?.flexible ? `<div class="panel-row"><span>本月剩余</span><strong class="${month.flexible.closing < 0 ? "negative" : ""}">${signedMoney(month.flexible.closing)}</strong></div>` : ""}<p class="muted">固定项目和灵活支出的正负结余会在统一结算时结转到下月。</p><button class="button primary-button" id="settle">统一结算至当前月</button></div>
-    ${sectionTitle("跨年预算", `<button class="text-button" id="addMulti">新增</button>`)}<div class="list">${state.multiYear.filter(p => p.active !== false).map(p => `<div class="list-row"><div><strong>${esc(p.name)}</strong><small>跨年资金池</small></div><div class="row-end"><strong>${formatMoney(p.amount)}</strong><button class="icon-button" data-delete-multi="${p.id}">×</button></div></div>`).join("") || `<div class="empty">还没有跨年预算</div>`}</div>`;
+    ${sectionTitle("跨年预算", `<button class="text-button" type="button" id="addMulti">${showMultiYearForm ? "取消" : "新增"}</button>`)}
+    ${showMultiYearForm ? `<form class="panel inline-create-form" id="multiYearForm"><div class="form-grid"><label>项目名称<input name="name" required autocomplete="off"></label><label>预算总额<input name="amount" type="number" min="0" step="0.01" required></label></div><button class="button primary-button">保存跨年预算</button></form>` : ""}
+    <div class="list">${state.multiYear.filter(p => p.active !== false).map(p => `<div class="list-row"><div><strong>${esc(p.name)}</strong><small>跨年资金池</small></div><div class="row-end"><strong>${formatMoney(p.amount)}</strong><button class="icon-button" data-delete-multi="${p.id}" aria-label="删除">×</button></div></div>`).join("") || `<div class="empty">还没有跨年预算</div>`}</div>`;
 }
 
 function budgetProjectSection(title, type, hint, projects) {
@@ -104,7 +108,10 @@ function budgetProjectSection(title, type, hint, projects) {
     const remaining = annualBudget === null ? null : annualBudget - spent;
     return `<div class="list-row"><div><strong>${esc(project.name)}</strong><small>${projectTypeLabel(project.type)} · 已用 ${formatMoney(spent)} · 剩余 ${remaining === null ? "待填写" : formatMoney(remaining)}</small></div><div class="row-end"><input class="inline-input" data-project-amount="${project.id}" type="number" step="0.01" value="${project.amount ?? ""}" placeholder="未填写"><button class="icon-button" data-delete-project="${project.id}" aria-label="删除">×</button></div></div>`;
   }).join("");
-  return `${sectionTitle(title, `<button class="text-button" data-add-project-type="${type}">新增</button>`)}<p class="muted budget-hint">${hint}</p><div class="list">${rows || `<div class="empty">还没有${title}项目</div>`}</div>`;
+  const form = projectFormType === type
+    ? `<form class="panel inline-create-form" data-project-form="${type}"><div class="form-grid"><label>项目名称<input name="name" required autocomplete="off"></label><label>${type === "interMonth" ? "财年预算总额" : "单月预算额度"}<input name="amount" type="number" min="0" step="0.01" placeholder="可稍后填写"></label></div><button class="button primary-button">保存${title}</button></form>`
+    : "";
+  return `${sectionTitle(title, `<button class="text-button" type="button" data-add-project-type="${type}">${projectFormType === type ? "取消" : "新增"}</button>`)}<p class="muted budget-hint">${hint}</p>${form}<div class="list">${rows || `<div class="empty">还没有${title}项目</div>`}</div>`;
 }
 
 function fiscalPeriodLabel(year) {
@@ -134,10 +141,44 @@ function bindEvents() {
   document.querySelectorAll("[data-delete-transaction]").forEach(node => node.addEventListener("click", async () => { const tx = state.transactions.find(item => item.id === node.dataset.deleteTransaction); if (!tx || !confirm("删除这笔流水？预算会生成返还影响。")) return; tx.active = false; await persist(); render(); }));
   document.querySelector("#saveAnnual")?.addEventListener("click", async () => { activeYear(state).annualBudget = inputMoney(document.querySelector("#annualBudget").value); await persist(); render(); });
   document.querySelectorAll("[data-project-amount]").forEach(node => node.addEventListener("change", async () => { const p = activeYear(state).projects.find(item => item.id === node.dataset.projectAmount); p.amount = inputMoney(node.value); await persist(); render(); }));
-  document.querySelectorAll("[data-add-project-type]").forEach(node => node.addEventListener("click", async () => { const type = node.dataset.addProjectType; const name = prompt(`${projectTypeLabel(type)}项目名称`); if (!name?.trim()) return; if (yearProjects(activeYear(state)).some(project => project.name === name.trim())) return toast("预算项目名称不能重复"); activeYear(state).projects.push({ id: id(), name: name.trim(), type, amount: null, active: true }); await persist(); render(); }));
+  document.querySelectorAll("[data-add-project-type]").forEach(node => node.addEventListener("click", () => {
+    projectFormType = projectFormType === node.dataset.addProjectType ? null : node.dataset.addProjectType;
+    render();
+  }));
+  document.querySelectorAll("[data-project-form]").forEach(form => form.addEventListener("submit", async event => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const type = event.currentTarget.dataset.projectForm;
+    const name = String(data.get("name") || "").trim();
+    const value = inputMoney(data.get("amount"));
+    if (!name) return toast("项目名称不能为空");
+    if (value !== null && value < 0) return toast("预算金额不能小于 0");
+    const duplicate = yearProjects(activeYear(state)).some(project => project.name === name)
+      || state.multiYear.some(project => project.active !== false && project.name === name);
+    if (duplicate) return toast("预算项目名称不能重复");
+    activeYear(state).projects.push({ id: id(), name, type, amount: value, active: true });
+    projectFormType = null;
+    await persist();
+    render();
+  }));
   document.querySelectorAll("[data-delete-project]").forEach(node => node.addEventListener("click", async () => { const p = activeYear(state).projects.find(item => item.id === node.dataset.deleteProject); if (!p || !confirm("删除预算项目？有关联流水时不能删除。")) return; if (activeTransactions().some(t => t.target === `project:${p.id}`)) return toast("该项目仍有关联流水，请先删除流水"); p.active = false; await persist(); render(); }));
   document.querySelector("#settle")?.addEventListener("click", async () => { try { settle(); await persist(); render(); toast("已结算到当前月"); } catch (error) { toast(error.message); } });
-  document.querySelector("#addMulti")?.addEventListener("click", async () => { const name = prompt("跨年项目名称"); if (!name?.trim()) return; const value = inputMoney(prompt("预算总额", "0")); state.multiYear.push({ id: id(), name: name.trim(), amount: value || 0, active: true }); await persist(); render(); });
+  document.querySelector("#addMulti")?.addEventListener("click", () => { showMultiYearForm = !showMultiYearForm; render(); });
+  document.querySelector("#multiYearForm")?.addEventListener("submit", async event => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const name = String(data.get("name") || "").trim();
+    const value = inputMoney(data.get("amount"));
+    if (!name) return toast("项目名称不能为空");
+    if (value === null || value < 0) return toast("预算金额不能小于 0");
+    const duplicate = yearProjects(activeYear(state)).some(project => project.name === name)
+      || state.multiYear.some(project => project.active !== false && project.name === name);
+    if (duplicate) return toast("预算项目名称不能重复");
+    state.multiYear.push({ id: id(), name, amount: value, active: true });
+    showMultiYearForm = false;
+    await persist();
+    render();
+  });
   document.querySelectorAll("[data-delete-multi]").forEach(node => node.addEventListener("click", async () => { const p = state.multiYear.find(item => item.id === node.dataset.deleteMulti); if (!p || !confirm("删除跨年预算？")) return; if (activeTransactions().some(t => t.target === `multi:${p.id}`)) return toast("该项目仍有关联流水，请先删除流水"); p.active = false; await persist(); render(); }));
   document.querySelector("#resetFiscal")?.addEventListener("click", async () => { const startMonth = Number(document.querySelector("#fiscalStart").value); if (startMonth === state.settings.fiscalStartMonth) return toast("起始月份没有变化"); if (!confirm("当前财年将封存，确认进入新财年？")) return; const old = activeYear(state); old.status = "archived"; old.months.forEach(m => m.status = "archived"); const start = fiscalStart(startMonth); state.settings.fiscalStartMonth = startMonth; state.fiscalYears.push({ id: id(), startMonth, startDate: start.toISOString(), status: "active", annualBudget: null, projects: yearProjects(old).map(p => ({ ...p, id: id(), amount: null })), months: monthsForFiscalYear(start) }); await persist(); page = "budget"; render(); });
   document.querySelector("#exportJSON")?.addEventListener("click", exportJSON);
