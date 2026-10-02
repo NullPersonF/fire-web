@@ -95,7 +95,7 @@ export function expenseBudgetBalance(state, year = activeYear(state)) {
   return budget - spent;
 }
 
-export function totalAssets(state) { return savingsTotal(state) + money(expenseBudgetBalance(state)); }
+export function totalAssets(state) { return savingsTotal(state); }
 
 export function currentBudgetMonth(state, year = activeYear(state)) {
   return year?.months.find(m => m.key === monthKey()) || year?.months[0];

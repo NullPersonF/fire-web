@@ -45,11 +45,11 @@ function sectionTitle(title, action = "") { return `<div class="section-title"><
 function amount(value, className = "") { return `<strong class="amount ${className}">${formatMoney(value)}</strong>`; }
 
 function dashboardView() {
-  const target = fireTarget(state), assets = totalAssets(state), expenseBalance = expenseBudgetBalance(state), gap = target - assets, income = latestIncome(state), monthly = income ? money(income.salary) + money(income.fund) : 0;
+  const target = fireTarget(state), assets = totalAssets(state), gap = target - assets, income = latestIncome(state), monthly = income ? money(income.salary) + money(income.fund) : 0;
   const months = gap > 0 && monthly > 0 ? Math.ceil(gap / monthly) : null;
   const retirement = months ? new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long" }).format(new Date(new Date().getFullYear(), new Date().getMonth() + months, 1)) : "";
   return `<div class="hero"><p class="eyebrow">${activeYear(state)?.startMonth || 1} 月起 · 当前财年</p><h2>财务自由看板</h2><p class="muted">所有数据只保存在这台设备上。</p></div>
-    <div class="metric primary"><span>当前总资产</span>${amount(assets)}<small>储蓄 ${formatMoney(savingsTotal(state))} · 支出账户 ${expenseBalance === null ? "待填写预算" : formatMoney(expenseBalance)}</small></div>
+    <div class="metric primary"><span>当前总资产</span>${amount(assets)}<small>储蓄账户</small></div>
     <div class="grid-two"><div class="metric"><span>FIRE 总目标</span>${amount(target)}</div><div class="metric"><span>资金缺口</span>${gap <= 0 ? "<strong class=\"status-good\">FIRE 已达成</strong>" : amount(gap)} </div></div>
     <div class="panel"><div class="panel-row"><span>还需要工作</span><strong>${gap <= 0 ? "已达成" : months ? `${months} 个月` : "待填写收入"}</strong></div>${retirement ? `<p class="muted">预计将在 ${retirement} 实现财务自由并退休</p>` : ""}<button class="button secondary" data-nav="assets">填写收入与资产</button></div>
     ${sectionTitle("FIRE 目标", `<button class="text-button" data-nav="settings">管理</button>`)}
